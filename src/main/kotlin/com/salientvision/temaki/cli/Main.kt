@@ -6,7 +6,11 @@ import com.salientvision.temaki.marshaller.LlmMarshaller
 import com.salientvision.temaki.marshaller.Marshaller
 import com.salientvision.temaki.marshaller.MarshallerConfig
 import com.salientvision.temaki.marshaller.OpenAiChatClient
+import com.salientvision.temaki.session.SessionDriver
+import com.salientvision.temaki.session.TmuxControl
+import com.salientvision.temaki.session.TmuxSession
 import java.io.File
+import java.time.Duration
 import kotlin.system.exitProcess
 
 private const val VERSION = "0.1.0"
@@ -14,6 +18,7 @@ private const val VERSION = "0.1.0"
 fun main(args: Array<String>) {
     when (args.firstOrNull()) {
         "replay" -> replay(args.drop(1))
+        "drive" -> drive(args.drop(1))
         "version", "--version", "-v" -> println("temaki marshal $VERSION")
         "help", "--help", "-h", null -> printUsage()
         else -> {
@@ -71,18 +76,98 @@ private fun replay(args: List<String>) {
     }
 }
 
+/**
+ * `marshal drive [--agent "<cmd>"] --prompt "<text>" [--prompt ...] [--llm]` — start a live tmux
+ * session running the agent command, run each prompt through it, and print the marshaller's verdict.
+ * Defaults the agent to `bc -q` (a free local REPL) so it smoke-tests with no paid backend.
+ */
+private fun drive(args: List<String>) {
+    var agent = System.getenv("TEMAKI_AGENT_CMD") ?: "bc -q"
+    var sessionName = "temaki-drive"
+    var useLlm = false
+    var timeoutSeconds = 30L
+    val prompts = mutableListOf<String>()
+
+    val it = args.iterator()
+    while (it.hasNext()) {
+        when (val arg = it.next()) {
+            "--agent" -> agent = nextValue(it, arg)
+            "--prompt" -> prompts += nextValue(it, arg)
+            "--session" -> sessionName = nextValue(it, arg)
+            "--timeout" -> timeoutSeconds = nextValue(it, arg).toLongOrNull()
+                ?: run { System.err.println("drive: --timeout needs an integer"); exitProcess(2) }
+            "--llm" -> useLlm = true
+            else -> {
+                System.err.println("drive: unknown argument '$arg'")
+                exitProcess(2)
+            }
+        }
+    }
+    if (prompts.isEmpty()) {
+        System.err.println("usage: marshal drive [--agent \"<cmd>\"] --prompt \"<text>\" [--prompt ...] [--llm]")
+        exitProcess(2)
+    }
+
+    val tmux = TmuxControl()
+    if (!tmux.available()) {
+        System.err.println("drive: no tmux binary found (set TEMAKI_TMUX or install tmux)")
+        exitProcess(3)
+    }
+
+    val marshaller: Marshaller = if (useLlm) {
+        LlmMarshaller(OpenAiChatClient(MarshallerConfig.fromEnv()))
+    } else {
+        HeuristicMarshaller()
+    }
+
+    println("agent:      $agent")
+    println("session:    $sessionName")
+    println("marshaller: ${if (useLlm) "llm" else "heuristic"}")
+
+    val session = TmuxSession(sessionName, tmux)
+    session.start(agent)
+    try {
+        val driver = SessionDriver(session, marshaller, turnTimeout = Duration.ofSeconds(timeoutSeconds))
+        for (prompt in prompts) {
+            println()
+            println(">>> $prompt")
+            val a = driver.runTurn(prompt)
+            println("    state:      ${a.state}")
+            println("    confidence: ${"%.2f".format(a.confidence)}")
+            a.rationale?.let { println("    rationale:  $it") }
+            val rendered = a.response?.takeIf { it.isNotEmpty() }?.let { "\n" + it.prependIndent("      ") } ?: " (none)"
+            println("    response:  $rendered")
+        }
+    } finally {
+        session.kill()
+        println()
+        println("session killed.")
+    }
+}
+
+private fun nextValue(it: Iterator<String>, flag: String): String {
+    if (!it.hasNext()) {
+        System.err.println("drive: $flag needs a value")
+        exitProcess(2)
+    }
+    return it.next()
+}
+
 private fun printUsage() {
     println(
         """
         temaki marshal $VERSION — terminal-agent marshaller
 
         usage:
-          marshal replay [--llm] <fixtureDir>   assess a captured fixture, print state + response
-          marshal version                       print version
-          marshal help                          show this help
+          marshal replay [--llm] <fixtureDir>           assess a captured fixture (state + response)
+          marshal drive [--agent "<cmd>"] --prompt "<p>" drive a live tmux session through a prompt
+                        [--prompt "<p>" ...] [--llm]     (repeat --prompt for sequential turns)
+          marshal version                               print version
+          marshal help                                  show this help
 
-        A fixture directory holds prompt.txt and snapshot-*.txt captures (optionally expected.json).
-        --llm uses the local marshaller endpoint from TEMAKI_MARSHALLER_* env vars; default is the
+        replay reads prompt.txt + snapshot-*.txt from a fixture directory (optionally expected.json).
+        drive launches the agent command (default: bc -q) as a tmux pane and reports each turn.
+        --llm routes the verdict through the local TEMAKI_MARSHALLER_* endpoint; the default is the
         deterministic heuristic, which needs no model.
         """.trimIndent(),
     )

@@ -26,9 +26,16 @@ back to the heuristic on any failure. ANSI/OSC stripping and carriage-return res
 `Ansi`. Verified against checked-in fixtures captured from real `bc` and `python3 -q` sessions plus
 synthetic messy-TUI panes; `marshal replay <fixtureDir>` prints the verdict for any capture.
 
-## Phase 2 — Server ⬜
+## Phase 2 — Server 🔨
 `POST /v1/chat/completions` and `GET /v1/models`. Token-gated, bound to loopback.
 Streaming via SSE. One in-flight turn per backend session, with a request queue.
+
+**Live session driver landed.** The bridge can spawn a tmux session running the target agent
+(launched directly as the pane process, so the pane is free of shell-prompt noise), inject a
+prompt, poll `capture-pane`, and feed the growing snapshot series to the marshaller until it
+reports a terminal state — trusting a verdict only once the pane has changed from the pre-send
+baseline. Verified live against `bc -q` and `python3 -q` (DONE / AWAITING_INPUT / ERROR);
+`marshal drive --agent "<cmd>" --prompt "<text>"` exercises it. The HTTP surface on top is next.
 
 ## Phase 3 — Session lifecycle ⬜
 Spawn / attach / detach / health-check / restart. Multiple concurrent sessions.

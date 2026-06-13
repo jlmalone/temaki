@@ -73,6 +73,11 @@ deterministic heuristic; configure the endpoint with the `TEMAKI_MARSHALLER_*` v
 documented in [`.env.example`](.env.example). Pane content is only ever sent to that local
 endpoint.
 
+`marshal drive --agent "<cmd>" --prompt "<text>"` drives a *live* session: it launches the
+agent command in a tmux pane, injects each prompt, and reports the marshaller's verdict — try
+`bc -q` or `python3 -q` to watch the full round-trip with no paid backend. Repeat `--prompt`
+for sequential turns.
+
 ## License
 
 MIT — see [`LICENSE`](LICENSE).
