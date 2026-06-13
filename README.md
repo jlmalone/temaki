@@ -23,10 +23,11 @@ watches the session and answers two questions —
 
 ## Status
 
-Early — **design + spike only.** This repository currently holds the design
-(`README.md`, `ROADMAP.md`) and the original proof-of-concept (`prototype/`) that
-demonstrated the round-trip. The productized server and marshaller described in the
-roadmap are not built yet.
+Early, and under active construction. The **marshaller** — the core that reads a live pane
+and decides turn-state while extracting the clean response — is built and tested (Phase 1).
+The live session driver and the OpenAI-compatible server come next. See
+[`ROADMAP.md`](ROADMAP.md) for the plan and [`prototype/`](prototype/) for the original
+proof-of-concept that demonstrated the round-trip.
 
 ## How it works (target design)
 
@@ -54,6 +55,23 @@ OpenAI-compatible client
   control API; `temaki` exists for interactive programs you *don't* control and can't
   modify.
 - Not a place for secrets. The bridge embeds no API keys or per-user credentials.
+
+## Build & develop
+
+Requires a JDK 21 toolchain. The marshaller and its CLI need no model and no live agent —
+they run entirely against checked-in fixtures, so the suite is hermetic.
+
+```bash
+./gradlew test            # unit + fixture-replay suite
+./gradlew installDist     # build the `marshal` CLI
+build/install/marshal/bin/marshal replay src/test/resources/fixtures/bc-arithmetic
+```
+
+`marshal replay <fixtureDir>` classifies a captured turn and prints the state plus the
+extracted response. Pass `--llm` to route the verdict through a local model instead of the
+deterministic heuristic; configure the endpoint with the `TEMAKI_MARSHALLER_*` variables
+documented in [`.env.example`](.env.example). Pane content is only ever sent to that local
+endpoint.
 
 ## License
 

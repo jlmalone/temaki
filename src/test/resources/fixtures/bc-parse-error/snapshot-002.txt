@@ -1,0 +1,6 @@
+>>> (2+2
+
+Parse error: bad expression
+    <stdin>:1
+
+>>>

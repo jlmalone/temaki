@@ -11,12 +11,20 @@ observable side effect captured back out. Turn-completion was guessed by a naive
 "pane unchanged for N ticks" heuristic — good enough to prove the concept, not enough to
 ship.
 
-## Phase 1 — Marshaller ⬜
+## Phase 1 — Marshaller ✅
 Replace the naive heuristic with a small **local model** that:
 - classifies session state — `working | awaiting_input | done | error`, and
 - extracts the response payload from the raw pane (strips ANSI, spinners, prompts).
 
 Pluggable model; runs locally; this is the core of the project.
+
+**Outcome:** shipped. One `Marshaller.assess(prompt, paneSnapshots) -> Assessment` interface with
+two implementations behind it: a deterministic `HeuristicMarshaller` (pane-stability + ready/
+continuation-prompt detection + open-input and error recognition; always available, no network) and
+an `LlmMarshaller` that asks a local OpenAI-compatible model for a structured JSON verdict and falls
+back to the heuristic on any failure. ANSI/OSC stripping and carriage-return resolution live in
+`Ansi`. Verified against checked-in fixtures captured from real `bc` and `python3 -q` sessions plus
+synthetic messy-TUI panes; `marshal replay <fixtureDir>` prints the verdict for any capture.
 
 ## Phase 2 — Server ⬜
 `POST /v1/chat/completions` and `GET /v1/models`. Token-gated, bound to loopback.
