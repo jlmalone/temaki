@@ -26,16 +26,20 @@ back to the heuristic on any failure. ANSI/OSC stripping and carriage-return res
 `Ansi`. Verified against checked-in fixtures captured from real `bc` and `python3 -q` sessions plus
 synthetic messy-TUI panes; `marshal replay <fixtureDir>` prints the verdict for any capture.
 
-## Phase 2 — Server 🔨
+## Phase 2 — Server ✅
 `POST /v1/chat/completions` and `GET /v1/models`. Token-gated, bound to loopback.
 Streaming via SSE. One in-flight turn per backend session, with a request queue.
 
-**Live session driver landed.** The bridge can spawn a tmux session running the target agent
-(launched directly as the pane process, so the pane is free of shell-prompt noise), inject a
-prompt, poll `capture-pane`, and feed the growing snapshot series to the marshaller until it
-reports a terminal state — trusting a verdict only once the pane has changed from the pre-send
-baseline. Verified live against `bc -q` and `python3 -q` (DONE / AWAITING_INPUT / ERROR);
-`marshal drive --agent "<cmd>" --prompt "<text>"` exercises it. The HTTP surface on top is next.
+**Outcome:** shipped, on top of a live session driver. The driver spawns a tmux session running
+the target agent directly as the pane process (no shell-prompt noise), injects a prompt, polls
+`capture-pane`, and feeds the growing snapshot series to the marshaller until a terminal state —
+trusting a verdict only once the pane has changed from the pre-send baseline. The Ktor server
+(loopback-bound, bearer-gated) exposes `GET /v1/models` and `POST /v1/chat/completions`
+(non-streaming and SSE), serializing turns per backend session through a mutex. A request maps to
+one turn (last user message injected) and returns an OpenAI-shaped completion; the marshaller
+verdict rides along in a client-ignored `x_temaki` field. Verified live: `curl` against a
+tmux-wrapped `bc -q` returns a well-formed completion (and SSE stream); `marshal serve` /
+`marshal drive` exercise it end to end against free local REPLs (`bc`, `python3 -q`).
 
 ## Phase 3 — Session lifecycle ⬜
 Spawn / attach / detach / health-check / restart. Multiple concurrent sessions.

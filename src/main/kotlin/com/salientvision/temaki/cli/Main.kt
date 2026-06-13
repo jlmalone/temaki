@@ -6,6 +6,9 @@ import com.salientvision.temaki.marshaller.LlmMarshaller
 import com.salientvision.temaki.marshaller.Marshaller
 import com.salientvision.temaki.marshaller.MarshallerConfig
 import com.salientvision.temaki.marshaller.OpenAiChatClient
+import com.salientvision.temaki.server.ServerConfig
+import com.salientvision.temaki.server.TmuxAgentBackend
+import com.salientvision.temaki.server.serve
 import com.salientvision.temaki.session.SessionDriver
 import com.salientvision.temaki.session.TmuxControl
 import com.salientvision.temaki.session.TmuxSession
@@ -19,6 +22,7 @@ fun main(args: Array<String>) {
     when (args.firstOrNull()) {
         "replay" -> replay(args.drop(1))
         "drive" -> drive(args.drop(1))
+        "serve" -> serveCmd(args.drop(1))
         "version", "--version", "-v" -> println("temaki marshal $VERSION")
         "help", "--help", "-h", null -> printUsage()
         else -> {
@@ -145,12 +149,52 @@ private fun drive(args: List<String>) {
     }
 }
 
-private fun nextValue(it: Iterator<String>, flag: String): String {
-    if (!it.hasNext()) {
-        System.err.println("drive: $flag needs a value")
-        exitProcess(2)
+/**
+ * `marshal serve [--agent "<cmd>"] [--port N] [--token T] [--model M] [--host H]` — run the
+ * OpenAI-compatible HTTP bridge over a live agent session. Settings default from the environment
+ * (`TEMAKI_*`); flags override. Binds loopback and gates `/v1` behind a bearer token.
+ */
+private fun serveCmd(args: List<String>) {
+    val base = ServerConfig.fromEnv()
+    var host = base.host
+    var port = base.port
+    var token = base.token
+    var tokenGenerated = base.tokenWasGenerated
+    var agent = base.agentCmd
+    var model = base.modelName
+    var agentExplicit = false
+    var modelExplicit = false
+
+    val it = args.iterator()
+    while (it.hasNext()) {
+        when (val arg = it.next()) {
+            "--host" -> host = nextValue(it, arg)
+            "--port" -> port = nextValue(it, arg).toIntOrNull() ?: fail("serve: --port needs an integer")
+            "--token" -> { token = nextValue(it, arg); tokenGenerated = false }
+            "--agent" -> { agent = nextValue(it, arg); agentExplicit = true }
+            "--model" -> { model = nextValue(it, arg); modelExplicit = true }
+            else -> fail("serve: unknown argument '$arg'")
+        }
     }
+    if (agentExplicit && !modelExplicit) model = ServerConfig.modelNameFor(agent)
+
+    val tmux = TmuxControl()
+    if (!tmux.available()) fail("serve: no tmux binary found (set TEMAKI_TMUX or install tmux)")
+
+    val config = ServerConfig(host, port, token, tokenGenerated, model, agent)
+    val backend = TmuxAgentBackend(config.modelName, config.agentCmd, tmux = tmux)
+    Runtime.getRuntime().addShutdownHook(Thread { backend.close() })
+    serve(config, backend)
+}
+
+private fun nextValue(it: Iterator<String>, flag: String): String {
+    if (!it.hasNext()) fail("$flag needs a value")
     return it.next()
+}
+
+private fun fail(message: String): Nothing {
+    System.err.println(message)
+    exitProcess(2)
 }
 
 private fun printUsage() {
@@ -162,13 +206,16 @@ private fun printUsage() {
           marshal replay [--llm] <fixtureDir>           assess a captured fixture (state + response)
           marshal drive [--agent "<cmd>"] --prompt "<p>" drive a live tmux session through a prompt
                         [--prompt "<p>" ...] [--llm]     (repeat --prompt for sequential turns)
+          marshal serve [--agent "<cmd>"] [--port N]     run the OpenAI-compatible HTTP bridge
+                        [--token T] [--model M]          (loopback; bearer-gated; SSE supported)
           marshal version                               print version
           marshal help                                  show this help
 
         replay reads prompt.txt + snapshot-*.txt from a fixture directory (optionally expected.json).
         drive launches the agent command (default: bc -q) as a tmux pane and reports each turn.
-        --llm routes the verdict through the local TEMAKI_MARSHALLER_* endpoint; the default is the
-        deterministic heuristic, which needs no model.
+        serve exposes POST /v1/chat/completions and GET /v1/models over the same live session.
+        Settings default from TEMAKI_* env (see .env.example); --llm routes the verdict through the
+        local TEMAKI_MARSHALLER_* endpoint instead of the deterministic heuristic.
         """.trimIndent(),
     )
 }
