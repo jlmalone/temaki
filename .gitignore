@@ -1,0 +1,23 @@
+# Local-only / private — never committed
+*.local.md
+*.local.*
+.env
+.env.*
+secrets/
+captures/
+*.token
+
+# macOS / editors
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Future build outputs (Python / Node)
+__pycache__/
+*.pyc
+.venv/
+venv/
+node_modules/
+dist/
+build/
